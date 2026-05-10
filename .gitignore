@@ -1,0 +1,22 @@
+# Databricks
+.databricks/
+__pycache__/
+*.pyc
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDEs
+.idea/
+.vscode/
+*.swp
+
+# Data — never commit
+*.csv
+*.parquet
+*.delta
+
+# MLflow runs (stay in workspace)
+mlruns/
+mlartifacts/
