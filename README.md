@@ -16,6 +16,32 @@ Designed to satisfy the must-have skills of a Senior Data Scientist role:
 A/B-testing-style validation methods + basic MLOps practices**.
 
 ---
+---
+
+## Quick start
+
+### In Databricks
+
+1. **Repos → Add Repo →** paste this repo https://github.com/andresmauriciov94-web/mlflow.git.
+2. Open `notebooks/00_eda.py` and run all. Repeat for 01, 02, 03, 04 in order.
+3. Edit the `EXPERIMENT_NAME` and data paths in the first cell of each notebook
+   to match your workspace.
+
+  
+# ExamplePaths 
+-   INPUT_TABLE      = "xxx.blind_test_data".
+-   PREDICTIONS_TBL  = "xxx.regression_predictions".
+-   REFERENCE_TBL    = "xxx.regression_training_reference"
+-   REGISTERED_NAME  = "regression_20feat_champion"
+
+### Required cluster
+
+- DBR 14.x ML or higher (includes MLflow, sklearn, xgboost, Spark MLlib).
+- `%pip install` cells at the top of each notebook handle remaining packages
+  (catboost, optuna).
+
+---
+
 
 ## Repository layout
 
@@ -151,24 +177,6 @@ deploying a Challenger model to production:
 | Inference Tables / Delta append per batch |
 | Lakehouse Monitoring + SQL Alerts + auto-rollback |
 
----
-
-## Quick start
-
-### In Databricks
-
-1. **Repos → Add Repo →** paste this repo URL.
-2. Open `notebooks/00_eda.py` and run all. Repeat for 01, 02, 03, 04 in order.
-3. Edit the `EXPERIMENT_NAME` and data paths in the first cell of each notebook
-   to match your workspace.
-
-### Required cluster
-
-- DBR 14.x ML or higher (includes MLflow, sklearn, xgboost, Spark MLlib).
-- `%pip install` cells at the top of each notebook handle remaining packages
-  (catboost, optuna).
-
----
 
 ## Architectural decisions (and why)
 

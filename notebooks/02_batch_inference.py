@@ -31,13 +31,13 @@ import mlflow.sklearn
 from mlflow.tracking import MlflowClient
 from pyspark.sql import functions as F
 
-EXPERIMENT_NAME = "/Users/avalderrama@colombina.com/regression_inference"
+EXPERIMENT_NAME = "/Usersxxx@xxx.com/regression_inference"
 mlflow.set_experiment(EXPERIMENT_NAME)
 
 # Paths 
-INPUT_TABLE      = "hr.agent.blind_test_data"
-PREDICTIONS_TBL  = "hr.agent.regression_predictions"
-REFERENCE_TBL    = "hr.agent.regression_training_reference"
+INPUT_TABLE      = "xxx.blind_test_data"
+PREDICTIONS_TBL  = "xxx.regression_predictions"
+REFERENCE_TBL    = "xxx.regression_training_reference"
 REGISTERED_NAME  = "regression_20feat_champion"
 
 # COMMAND ----------
@@ -164,7 +164,7 @@ with mlflow.start_run(run_name=f"batch_inference_{datetime.now():%Y%m%d_%H%M%S}"
 # MAGIC   ROUND(MIN(prediction), 2)   as pred_min,
 # MAGIC   ROUND(MAX(prediction), 2)   as pred_max,
 # MAGIC   MAX(prediction_timestamp)   as last_run
-# MAGIC FROM hr.agent.regression_predictions
+# MAGIC FROM xxx.regression_predictions
 # MAGIC GROUP BY model_version
 
 # COMMAND ----------

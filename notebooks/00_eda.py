@@ -39,12 +39,12 @@ warnings.filterwarnings("ignore")
 plt.rcParams["figure.dpi"] = 110
 
 # MLflow native — replace with your workspace path
-EXPERIMENT_NAME = "/Users/avalderrama@colombina.com/regression_eda" 
+EXPERIMENT_NAME = "/Users/xxx@xxx/regression_eda" 
 mlflow.set_experiment(EXPERIMENT_NAME)
 mlflow.autolog(disable=True)  # evita runs fantasma en cada .fit()
 
 # Data path — adjust to your Volume/DBFS location
-TRAIN_PATH = "hr.agent.training_data"
+TRAIN_PATH = "xxx.training_data"
 print(f"Spark {spark.version}  |  MLflow {mlflow.__version__}")
 
 # COMMAND ----------

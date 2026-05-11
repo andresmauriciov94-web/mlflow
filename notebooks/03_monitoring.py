@@ -34,13 +34,13 @@ import mlflow
 from pyspark.sql import functions as F
 from scipy.stats import ks_2samp, wasserstein_distance
 
-EXPERIMENT_NAME = "/Users/avalderrama@colombina.com/regression_monitoring"  # EDIT
+EXPERIMENT_NAME = "/Users/xxx@xxx.com/regression_monitoring"  # EDIT
 mlflow.set_experiment(EXPERIMENT_NAME)
 plt.rcParams["figure.dpi"] = 110
 
-REFERENCE_TBL    = "hr.agent.regression_training_reference"
-PREDICTIONS_TBL  = "hr.agent.regression_predictions"
-MONITORING_TBL   = "hr.agent.regression_monitoring"
+REFERENCE_TBL    = "xxx.regression_training_reference"
+PREDICTIONS_TBL  = "xxx.regression_predictions"
+MONITORING_TBL   = "xxx.regression_monitoring"
 
 # Drift thresholds
 PSI_WARNING = 0.10
@@ -163,7 +163,7 @@ model = mlflow.sklearn.load_model("models:/regression_20feat_champion@Production
 # COMMAND ----------
 
 # Read the blind input for re-simulation
-blind_pdf = spark.read.table("hr.agent.blind_test_data").toPandas()
+blind_pdf = spark.read.table("xxx.blind_test_data").toPandas()
 n_total = len(blind_pdf)
 batch_size = n_total // 4  # 50 each
 
@@ -523,7 +523,7 @@ with mlflow.start_run(run_name="monitoring_dashboard"):
 # MAGIC -- Daily severity timeline
 # MAGIC SELECT day, timestamp, severity, prediction_psi, feature_psi_max,
 # MAGIC        feature_n_alerts, feature_n_warnings
-# MAGIC FROM hr.agent.regression_monitoring
+# MAGIC FROM xxx.regression_monitoring
 # MAGIC ORDER BY day
 
 # COMMAND ----------
@@ -531,7 +531,7 @@ with mlflow.start_run(run_name="monitoring_dashboard"):
 # MAGIC %sql
 # MAGIC -- Days requiring intervention (>= warning)
 # MAGIC SELECT count(*) as days_with_drift
-# MAGIC FROM hr.agent.regression_monitoring
+# MAGIC FROM xxx.regression_monitoring
 # MAGIC WHERE severity IN ('warning', 'alert')
 
 # COMMAND ----------
@@ -555,8 +555,8 @@ with mlflow.start_run(run_name="monitoring_dashboard"):
 # COMMAND ----------
 
 # Compare distributions of training vs blind + log to MLflow
-train_pdf = spark.table("hr.agent.training_data").toPandas()
-blind_pdf = spark.table("hr.agent.blind_test_data").toPandas()
+train_pdf = spark.table("xxx.training_data").toPandas()
+blind_pdf = spark.table("xxx.blind_test_data").toPandas()
 
 feature_cols = [f"feature_{i}" for i in range(20)]
 

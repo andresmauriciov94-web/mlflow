@@ -54,13 +54,13 @@ from pyspark.sql import functions as F
 warnings.filterwarnings("ignore")
 plt.rcParams["figure.dpi"] = 110
 
-EXPERIMENT_NAME = "/Users/avalderrama@colombina.com/regression_canary"  # EDIT
+EXPERIMENT_NAME = "/Users/xxx@xxx.com/regression_canary"  # EDIT
 mlflow.set_experiment(EXPERIMENT_NAME)
 
 # Tables
-BLIND_INPUT_TBL   = "hr.agent.blind_test_data"
-CANARY_PREDS_TBL  = "hr.agent.regression_canary_predictions"
-CANARY_DECISIONS_TBL = "hr.agent.regression_canary_decisions"
+BLIND_INPUT_TBL   = "xxx.blind_test_data"
+CANARY_PREDS_TBL  = "xxx.regression_canary_predictions"
+CANARY_DECISIONS_TBL = "xxxt.regression_canary_decisions"
 
 # Model Registry
 REGISTERED_NAME = "regression_20feat_champion"

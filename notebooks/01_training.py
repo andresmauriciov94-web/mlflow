@@ -50,8 +50,8 @@ from scipy.stats import pearsonr, spearmanr, shapiro, wilcoxon
 warnings.filterwarnings("ignore")
 optuna.logging.set_verbosity(optuna.logging.WARNING)
 plt.rcParams["figure.dpi"] = 110
-TRAIN_PATH = "hr.agent.training_data"
-EXPERIMENT_NAME = "/Users/avalderrama@colombina.com/regression_training"  # EDIT
+TRAIN_PATH = "xxx.training_data"
+EXPERIMENT_NAME = "/Users/axxxa@xxx.com/regression_training"  # EDIT
 mlflow.set_experiment(EXPERIMENT_NAME)
 mlflow.sklearn.autolog(log_input_examples=True, log_model_signatures=True, silent=True)
 
@@ -484,7 +484,7 @@ reference_pdf = pd.DataFrame(X_full,
 reference_pdf["target"] = y_full
 reference_pdf["oof_prediction"] = oof
 
-REFERENCE_TABLE = "hr.agent.regression_training_reference"
+REFERENCE_TABLE = "xxx.regression_training_reference"
 (spark.createDataFrame(reference_pdf)
     .write.format("delta").mode("overwrite")
     .option("overwriteSchema", "true")
