@@ -2,18 +2,18 @@
 # MAGIC %md
 # MAGIC # 02 — Batch Inference
 # MAGIC
-# MAGIC **Patrón estándar de batch inference en Databricks:**
-# MAGIC 1. Leer Delta table de input
-# MAGIC 2. Cargar modelo champion del MLflow Registry (`@Production`)
-# MAGIC 3. Predecir
-# MAGIC 4. Persistir como Delta table
-# MAGIC 5. Loguear corrida en MLflow para auditoría
+# MAGIC **Standard batch inference pattern in Databricks:**
+# MAGIC 1. Read input Delta table
+# MAGIC 2. Load champion model from MLflow Registry (`@Production`)
+# MAGIC 3. Predict
+# MAGIC 4. Persist as Delta table
+# MAGIC 5. Log run in MLflow for auditability
 # MAGIC
-# MAGIC En producción real este notebook sería un **Databricks Job** programado
-# MAGIC con cron (ej: diario a las 2 AM) o file-arrival trigger.
+# MAGIC In real production, this notebook would be a **Databricks Job** scheduled
+# MAGIC with cron (e.g., daily at 2 AM) or a file-arrival trigger.
 # MAGIC
-# MAGIC **Para este caso (200 filas blind)** lo ejecutamos manualmente, pero el
-# MAGIC patrón es idéntico al de un job nocturno sobre millones de filas.
+# MAGIC **For this case (200 blind rows)** we execute it manually, but the
+# MAGIC pattern is identical to a nightly job over millions of rows.
 
 # COMMAND ----------
 
@@ -172,15 +172,18 @@ with mlflow.start_run(run_name=f"batch_inference_{datetime.now():%Y%m%d_%H%M%S}"
 # MAGIC %md
 # MAGIC ## 5. How this becomes a production Job
 # MAGIC
-# MAGIC En Databricks UI:
+# MAGIC In Databricks UI:
 # MAGIC 1. **Workflows** → **Create Job**
-# MAGIC 2. Task type: Notebook → seleccionar `02_batch_inference.py`
-# MAGIC 3. Cluster: **Job cluster** (se levanta solo, ahorra costes)
-# MAGIC 4. Schedule: cron (ej: `0 2 * * *` = todos los días a las 2 AM)
+# MAGIC 2. Task type: Notebook → select `02_batch_inference.py`
+# MAGIC 3. Cluster: **Job cluster** (auto-starts, saves costs)
+# MAGIC 4. Schedule: cron (e.g., `0 2 * * *` = every day at 2 AM)
 # MAGIC 5. Notifications: email / Slack on failure
-# MAGIC 6. Retries: 3 antes de marcar como failed
-# MAGIC 7. (Opcional) File arrival trigger: corre cuando aparece data nueva en el Volume
+# MAGIC 6. Retries: 3 before marking as failed
+# MAGIC 7. (Optional) File arrival trigger: runs when new data appears in the Volume
 # MAGIC
-# MAGIC Cada corrida del job genera un MLflow run nuevo. El siguiente notebook
-# MAGIC (`03_monitoring`) consume estos runs para detectar drift.
-# MAGIC
+# MAGIC Each job run generates a new MLflow run. The next notebook
+# MAGIC (`03_monitoring`) consumes these runs to detect drift.
+
+# COMMAND ----------
+
+

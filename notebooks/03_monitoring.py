@@ -1,26 +1,26 @@
 # Databricks notebook source
 # MAGIC %md
-# MAGIC # 03 — Monitoring with temporal simulation
+# MAGIC # 03 — Monitoring with Temporal Simulation
 # MAGIC
-# MAGIC **Patrón de monitoring de modelos en producción.**
+# MAGIC **Model monitoring pattern in production.**
 # MAGIC
-# MAGIC Una vez el modelo está en producción nos importan 3 cosas:
-# MAGIC 1. **Data drift** — ¿las features que entran hoy se parecen a las del training?
-# MAGIC 2. **Prediction drift** — ¿la distribución de predicciones cambió?
-# MAGIC 3. **Performance drift** — ¿el modelo sigue siendo preciso?
-# MAGIC    (solo medible cuando llega ground truth)
+# MAGIC Once the model is in production, we care about three things:
+# MAGIC 1. **Data drift** — Do today's features look like those in training?
+# MAGIC 2. **Prediction drift** — Has the prediction distribution changed?
+# MAGIC 3. **Performance drift** — Is the model still accurate?
+# MAGIC    (only measurable when ground truth arrives)
 # MAGIC
-# MAGIC **Simulación temporal.** Como el blind son 200 filas estáticas, partimos
-# MAGIC el batch en 4 sub-batches simulando 4 días de producción. En cada día
-# MAGIC inyectamos drift sintético creciente (shift de medias, cambio de varianzas)
-# MAGIC para demostrar que el sistema lo detecta.
+# MAGIC **Temporal simulation.** Since the blind set contains 200 static rows, we split
+# MAGIC the batch into 4 sub-batches simulating 4 days of production. Each day,
+# MAGIC we inject increasing synthetic drift (mean shifts, variance changes)
+# MAGIC to demonstrate that the system detects it.
 # MAGIC
-# MAGIC **Métricas:**
-# MAGIC - **PSI (Population Stability Index)** — métrica estándar industria
-# MAGIC - **KS test (Kolmogorov-Smirnov)** — basada en CDFs
-# MAGIC - **Wasserstein distance** — sensible a colas
+# MAGIC **Metrics:**
+# MAGIC - **PSI (Population Stability Index)** — industry standard metric
+# MAGIC - **KS test (Kolmogorov-Smirnov)** — based on CDFs
+# MAGIC - **Wasserstein distance** — sensitive to tails
 # MAGIC
-# MAGIC Reglas de pulgar PSI: < 0.10 estable, 0.10-0.25 warning, > 0.25 alert.
+# MAGIC PSI rule of thumb: < 0.10 stable, 0.10-0.25 warning, > 0.25 alert.
 
 # COMMAND ----------
 
@@ -149,16 +149,16 @@ model = mlflow.sklearn.load_model("models:/regression_20feat_champion@Production
 # MAGIC %md
 # MAGIC ## 4. Temporal simulation
 # MAGIC
-# MAGIC **Estrategia.** Partimos el blind (200 filas) en 4 sub-batches (50 filas c/u)
-# MAGIC simulando 4 días de producción. En cada día inyectamos drift sintético
-# MAGIC creciente sobre features clave. El sistema debe detectarlo y escalar la severidad.
+# MAGIC **Strategy.** We split the blind set (200 rows) into 4 sub-batches (50 rows each)
+# MAGIC simulating 4 days of production. Each day we inject increasing synthetic drift
+# MAGIC on key features. The system should detect it and escalate severity.
 # MAGIC
-# MAGIC | Día | Drift inyectado |
-# MAGIC |---|---|
-# MAGIC | 1 | Sin drift (baseline) |
-# MAGIC | 2 | Shift +0.5σ en feature_2 |
-# MAGIC | 3 | Shift +1.0σ en feature_2 + variance ×1.5 en feature_13 |
-# MAGIC | 4 | Drift severo: shift +2σ + variance ×2 + nueva correlación |
+# MAGIC  Day | Injected drift |
+# MAGIC ---|---|
+# MAGIC  1 | No drift (baseline) |
+# MAGIC  2 | Shift +0.5σ in feature_2 |
+# MAGIC  3 | Shift +1.0σ in feature_2 + variance ×1.5 in feature_13 |
+# MAGIC  4 | Severe drift: shift +2σ + variance ×2 + new correlation |
 
 # COMMAND ----------
 
@@ -537,28 +537,7 @@ with mlflow.start_run(run_name="monitoring_dashboard"):
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ## 9. Production hookup
 # MAGIC
-# MAGIC ### Databricks SQL Alerts
-# MAGIC En Databricks UI → **SQL** → **Alerts** → New Alert:
-# MAGIC ```sql
-# MAGIC SELECT count(*) FROM main.default.regression_monitoring
-# MAGIC WHERE severity = 'alert' AND timestamp >= current_date() - INTERVAL 1 DAY
-# MAGIC ```
-# MAGIC Trigger: `value > 0` → email / Slack notification.
-# MAGIC
-# MAGIC ### Databricks Workflow
-# MAGIC Encadenar `02_batch_inference.py` → `03_monitoring.py` como dos tasks
-# MAGIC del mismo Job. Si monitoring detecta drift severo, se puede gatillar
-# MAGIC un re-training automático.
-# MAGIC
-# MAGIC ### Action thresholds
-# MAGIC | Severity | Action |
-# MAGIC |---|---|
-# MAGIC | OK | continue serving |
-# MAGIC | Warning | log + investigate within 1 week |
-# MAGIC | Alert | manual review + consider retraining |
-# MAGIC | Critical (3+ consecutive alerts) | auto-trigger retraining workflow |
 # MAGIC
 # MAGIC ## Summary
 # MAGIC

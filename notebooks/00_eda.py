@@ -134,7 +134,7 @@ with mlflow.start_run(run_name="outlier_analysis"):
     # --- Method 3: Isolation Forest (multivariate) ---
     # Detects observations where the COMBINATION of features is unusual
     # even if each feature individually is within range
-    mlflow.end_run()  # cierra cualquier run huérfano de celdas anteriores
+    mlflow.end_run() 
     with mlflow.start_run(run_name=" Isolation Forest (multivariate) "):
         iso = IsolationForest(
             contamination=0.05,    # assume ~5% multivariate outliers
@@ -198,9 +198,9 @@ with mlflow.start_run(run_name="outlier_analysis"):
             axes[2].set_title("Anomaly score vs target  (do outliers have extreme y?)")
 
             plt.tight_layout()
-            plt.savefig("/tmp/outlier_analysis.png", dpi=110, bbox_inches="tight")
+            plt.savefig("outlier_analysis.png", dpi=110, bbox_inches="tight")
             plt.close()
-            mlflow.log_artifact("/tmp/outlier_analysis.png")
+            mlflow.log_artifact("outlier_analysis.png")
 
 
             # --- Decision ---
@@ -299,16 +299,10 @@ print(verdict)
 
 # COMMAND ----------
 
-
-
-# COMMAND ----------
-
 # MAGIC %md
-# MAGIC ## 4. Pearson + Spearman correlation distribuídas
+# MAGIC ## 4. Distributed Pearson + Spearman correlation
 # MAGIC
-# MAGIC La diferencia entre **|Spearman|** y **|Pearson|** revela relaciones
-# MAGIC monótonas no-lineales. Si para alguna feature `|ρ| >> |r|`, esa feature
-# MAGIC tiene señal NO-lineal con el target — invisible para modelos lineales.
+# MAGIC The difference between **|Spearman|** and **|Pearson|** reveals monotonic nonlinear relationships. If for any feature `|ρ| >> |r|`, that feature has nonlinear signal with the target — invisible to linear models.
 
 # COMMAND ----------
 
@@ -365,7 +359,7 @@ with mlflow.start_run(run_name="feature_selection_mi"):
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ## 5. Justificación NO PCA — quantitative test
+# MAGIC ## 5. PCA — quantitative test
 
 # COMMAND ----------
 
@@ -420,8 +414,9 @@ with mlflow.start_run(run_name="pca_justification"):
     axes[1].set_title("Distribution of variance across PCs")
     axes[1].legend()
     plt.tight_layout()
-    plt.savefig("/tmp/pca_analysis.png", dpi=110, bbox_inches="tight"); plt.close()
-    mlflow.log_artifact("/tmp/pca_analysis.png")
+    plt.savefig("pca_analysis.png", dpi=110, bbox_inches="tight"); plt.close()
+    mlflow.log_artifact("pca_analysis.png")
+    
 
     mlflow.set_tag("verdict_pca",
                     "REJECTED — variance uniformly spread; no informative reduction")
@@ -438,11 +433,13 @@ with mlflow.start_run(run_name="pca_justification"):
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ## 6. Justificación NO modelos lineales
+# MAGIC ## 6. Justification for NOT using linear models
 # MAGIC
-# MAGIC Comparamos un modelo lineal regularizado (Ridge) contra un baseline no-lineal
-# MAGIC simple (RandomForest), ambos sobre las features estandarizadas. Si el gap
-# MAGIC es grande, lo lineal no captura la estructura del problema.
+# MAGIC We compare a regularized linear model (Ridge) against a simple nonlinear baseline
+# MAGIC (RandomForest), both using standardized features. If the gap is large, the linear model
+# MAGIC does not capture the structure of the problem.
+# MAGIC
+# MAGIC
 
 # COMMAND ----------
 
@@ -507,8 +504,8 @@ with mlflow.start_run(run_name="linear_vs_nonlinear"):
         ax.text(r-0.02, i, f"{r:.3f}", va="center", ha="right",
                 color="white", fontsize=11, fontweight="bold")
     plt.tight_layout()
-    plt.savefig("/tmp/linear_vs_nonlinear.png", dpi=110, bbox_inches="tight"); plt.close()
-    mlflow.log_artifact("/tmp/linear_vs_nonlinear.png")
+    plt.savefig("linear_vs_nonlinear.png", dpi=110, bbox_inches="tight"); plt.close()
+    mlflow.log_artifact("linear_vs_nonlinear.png")
 
     mlflow.set_tag("verdict_linear_models",
                     f"REJECTED — gap {gap*100:+.1f}pp confirms non-linear structure")
@@ -525,11 +522,11 @@ with mlflow.start_run(run_name="linear_vs_nonlinear"):
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ## 7. K-means clustering — ¿hay grupos naturales en los datos?
+# MAGIC ## 7. K-means clustering — Are there natural groups in the data?
 # MAGIC
-# MAGIC **Por qué clustering en EDA.** Si los datos forman grupos con `target` muy
-# MAGIC distinto pero esos grupos no son linealmente separables (centroides
-# MAGIC entrelazados en el espacio original), refuerza el argumento de no-linealidad.
+# MAGIC **Why clustering in EDA.** If the data forms groups with very different `target`
+# MAGIC values, but those groups are not linearly separable (centroids intertwined in the
+# MAGIC original feature space), it reinforces the argument for non-linearity.
 
 # COMMAND ----------
 
@@ -606,8 +603,9 @@ with mlflow.start_run(run_name="kmeans_clustering"):
     axes[2].set_title(f"Target distribution by cluster (η²={eta_squared:.3f})")
     plt.suptitle("")
     plt.tight_layout()
-    plt.savefig("/tmp/kmeans_analysis.png", dpi=110, bbox_inches="tight"); plt.close()
-    mlflow.log_artifact("/tmp/kmeans_analysis.png")
+    
+    plt.savefig("kmeans_analysis.png", dpi=110, bbox_inches="tight"); plt.close()
+    mlflow.log_artifact("kmeans_analysis.png")
 
     if eta_squared > 0.10:
         mlflow.set_tag("clustering_finding",
@@ -635,9 +633,13 @@ with mlflow.start_run(run_name="kmeans_clustering"):
 # MAGIC ### Implications for modelling
 # MAGIC - Use **non-linear models** (gradient boosting, random forest)
 # MAGIC - Apply **feature engineering** to expose interactions and non-linear transforms
-# MAGIC - **Skip PCA**; rotation hurts tree-based methods
+# MAGIC - **Skip PCA**
 # MAGIC - Use **mutual-information** based feature selection (captures non-linearity)
 # MAGIC - Validate via **nested cross-validation** to avoid biased hyperparameter selection
 # MAGIC
 # MAGIC Next notebook: `01_training.py` — implements the modelling pipeline.
 # MAGIC
+
+# COMMAND ----------
+
+

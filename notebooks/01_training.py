@@ -3,17 +3,17 @@
 # MAGIC # 01 — Training: CatBoost vs RandomForest
 # MAGIC ## Nested CV + Optuna + MLflow + leakage-free Pipeline
 # MAGIC
-# MAGIC **Modelos.** Dos no-lineales NO redundantes:
-# MAGIC - **CatBoost** — boosting secuencial, ordered boosting (regularización built-in)
-# MAGIC - **RandomForest** — bagging paralelo, filosofía opuesta
+# MAGIC **Models.** Two non-redundant nonlinear models:
+# MAGIC - **CatBoost** — sequential boosting, ordered boosting (built-in regularization)
+# MAGIC - **RandomForest** — parallel bagging, opposite philosophy
 # MAGIC
-# MAGIC **Validación.** Nested CV (5 outer × 3 inner) + Optuna 50 trials por outer fold.
-# MAGIC La métrica reportada es la media de los 5 outer-fold scores — el único
-# MAGIC estimate matemáticamente insesgado de la performance esperada.
+# MAGIC **Validation.** Nested CV (5 outer × 3 inner) + Optuna 50 trials per outer fold.
+# MAGIC The reported metric is the mean of the 5 outer-fold scores — the only
+# MAGIC mathematically unbiased estimate of expected performance.
 # MAGIC
-# MAGIC **Anti-leakage.** Todo va dentro de un `sklearn.Pipeline` (FE → scaler →
-# MAGIC selector → modelo). Los parámetros aprendidos por scaler/selector vienen
-# MAGIC SOLO de los datos de train de cada fold.
+# MAGIC **Anti-leakage.** Everything goes inside an `sklearn.Pipeline` (FE → scaler →
+# MAGIC selector → model). The parameters learned by scaler/selector come
+# MAGIC ONLY from the training data of each fold.
 
 # COMMAND ----------
 
@@ -79,13 +79,13 @@ print(f"Training: {X_full.shape}")
 
 # COMMAND ----------
 
-#taking this feature because EDEA decition
+# Including this feature based on EDEA's decision
 TOP_MI_FEATURES = ["feature_2","feature_13","feature_16","feature_9",
                    "feature_3","feature_18","feature_11","feature_5"]
 TOP4_LINEAR     = ["feature_2","feature_13","feature_9","feature_11"]
 WEIGHTED_TOP_WEIGHTS = {"feature_2":0.50,"feature_13":0.30,
                         "feature_16":0.15,"feature_9":0.05}
-# queremos que esto se inserte dentro de un sklearn.Pipeline. Y sklearn solo acepta clases que cumplan su "contrato": método .fit(), método .transform(), parámetros expuestos en __init__. Si lo hacemos clase con esos dos mixins, sklearn la trata como ciudadano de primera clase: funciona en Pipeline, en cross_val_score, en GridSearchCV, etc.Sin esto, no podríamos tener garantía anti-leakage.
+# FeatureEngineer is implemented as a class with BaseEstimator and TransformerMixin to comply with sklearn's "contract": .fit(), .transform() methods and parameters in __init__. This allows integration into a Pipeline, enabling cross-validation and hyperparameter search without data leakage. It ensures that variable processing is fitted only with training data in each fold, preventing leakage and guaranteeing unbiased estimates.
 
 class FeatureEngineer(BaseEstimator, TransformerMixin):
     """Deterministic FE: log/sqrt/sq on top-MI, products on top-4, row aggregates."""
