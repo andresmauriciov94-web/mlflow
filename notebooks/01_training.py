@@ -18,7 +18,7 @@
 # COMMAND ----------
 
 # MAGIC %pip install -q catboost optuna
-# MAGIC dbutils.library.restartPython()
+# MAGIC
 
 # COMMAND ----------
 
@@ -50,8 +50,8 @@ from scipy.stats import pearsonr, spearmanr, shapiro, wilcoxon
 warnings.filterwarnings("ignore")
 optuna.logging.set_verbosity(optuna.logging.WARNING)
 plt.rcParams["figure.dpi"] = 110
-
-EXPERIMENT_NAME = "/Users/your.email@company.com/regression_training"  # EDIT
+TRAIN_PATH = "hr.agent.training_data"
+EXPERIMENT_NAME = "/Users/avalderrama@colombina.com/regression_training"  # EDIT
 mlflow.set_experiment(EXPERIMENT_NAME)
 mlflow.sklearn.autolog(log_input_examples=True, log_model_signatures=True, silent=True)
 
@@ -62,7 +62,8 @@ mlflow.sklearn.autolog(log_input_examples=True, log_model_signatures=True, silen
 
 # COMMAND ----------
 
-train_sdf = spark.read.table("main.default.regression_training")
+train_sdf = spark.table(TRAIN_PATH)
+
 df_train = train_sdf.toPandas()
 y_full = df_train["target"].values
 X_full = df_train.drop(columns="target").values
@@ -78,11 +79,13 @@ print(f"Training: {X_full.shape}")
 
 # COMMAND ----------
 
+#taking this feature because EDEA decition
 TOP_MI_FEATURES = ["feature_2","feature_13","feature_16","feature_9",
                    "feature_3","feature_18","feature_11","feature_5"]
 TOP4_LINEAR     = ["feature_2","feature_13","feature_9","feature_11"]
 WEIGHTED_TOP_WEIGHTS = {"feature_2":0.50,"feature_13":0.30,
                         "feature_16":0.15,"feature_9":0.05}
+# queremos que esto se inserte dentro de un sklearn.Pipeline. Y sklearn solo acepta clases que cumplan su "contrato": método .fit(), método .transform(), parámetros expuestos en __init__. Si lo hacemos clase con esos dos mixins, sklearn la trata como ciudadano de primera clase: funciona en Pipeline, en cross_val_score, en GridSearchCV, etc.Sin esto, no podríamos tener garantía anti-leakage.
 
 class FeatureEngineer(BaseEstimator, TransformerMixin):
     """Deterministic FE: log/sqrt/sq on top-MI, products on top-4, row aggregates."""
@@ -276,7 +279,7 @@ def nested_cv(X, y, model_name, n_outer=5, n_inner=3, n_trials=50, seed=42):
 
 # COMMAND ----------
 
-N_OUTER, N_INNER, N_TRIALS = 5, 3, 50
+N_OUTER, N_INNER, N_TRIALS = 5, 3, 5
 
 # ---- CatBoost ----
 print("="*72); print("CatBoost — nested CV"); print("="*72)
@@ -393,11 +396,13 @@ with mlflow.start_run(run_name="champion_diagnostics"):
     mlflow.log_metric("heteroscedasticity_p", het_p)
     mlflow.log_metric("durbin_watson", dw)
 
-    # Bootstrap CI on full-data R²
+    # Bootstrap CI on full-data R² (mismos índices para y_true y y_pred)
     rng = np.random.default_rng(42)
     n = len(y_full)
-    boot = np.array([r2_score(y_full[rng.integers(0,n,n)], oof[rng.integers(0,n,n)])
-                      for _ in range(2000)])
+    def _boot_r2():
+        idx = rng.integers(0, n, n)
+        return r2_score(y_full[idx], oof[idx])
+    boot = np.array([_boot_r2() for _ in range(2000)])
     ci_lo, ci_hi = np.percentile(boot, [2.5, 97.5])
     mlflow.log_metric("oof_r2_ci95_low",  float(ci_lo))
     mlflow.log_metric("oof_r2_ci95_high", float(ci_hi))
@@ -479,11 +484,12 @@ reference_pdf = pd.DataFrame(X_full,
 reference_pdf["target"] = y_full
 reference_pdf["oof_prediction"] = oof
 
+REFERENCE_TABLE = "hr.agent.regression_training_reference"
 (spark.createDataFrame(reference_pdf)
     .write.format("delta").mode("overwrite")
     .option("overwriteSchema", "true")
-    .saveAsTable("main.default.regression_training_reference"))
-print("Reference distributions saved → main.default.regression_training_reference")
+    .saveAsTable(REFERENCE_TABLE))
+print(f"Reference distributions saved → {REFERENCE_TABLE}")
 
 # COMMAND ----------
 
@@ -500,4 +506,4 @@ print("Reference distributions saved → main.default.regression_training_refere
 # MAGIC | Reference distributions | saved as Delta for downstream monitoring |
 # MAGIC
 # MAGIC Next: `02_batch_inference.py` — load champion from Registry, predict the blind batch.
-
+# MAGIC

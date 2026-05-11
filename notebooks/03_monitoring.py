@@ -34,13 +34,13 @@ import mlflow
 from pyspark.sql import functions as F
 from scipy.stats import ks_2samp, wasserstein_distance
 
-EXPERIMENT_NAME = "/Users/your.email@company.com/regression_monitoring"  # EDIT
+EXPERIMENT_NAME = "/Users/avalderrama@colombina.com/regression_monitoring"  # EDIT
 mlflow.set_experiment(EXPERIMENT_NAME)
 plt.rcParams["figure.dpi"] = 110
 
-REFERENCE_TBL    = "main.default.regression_training_reference"
-PREDICTIONS_TBL  = "main.default.regression_predictions"
-MONITORING_TBL   = "main.default.regression_monitoring"
+REFERENCE_TBL    = "hr.agent.regression_training_reference"
+PREDICTIONS_TBL  = "hr.agent.regression_predictions"
+MONITORING_TBL   = "hr.agent.regression_monitoring"
 
 # Drift thresholds
 PSI_WARNING = 0.10
@@ -52,6 +52,11 @@ KS_ALERT    = 0.20
 
 # MAGIC %md
 # MAGIC ## 1. Drift detection functions
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC
 
 # COMMAND ----------
 
@@ -109,7 +114,7 @@ def drift_metrics(ref: np.ndarray, cur: np.ndarray) -> dict:
 
 # COMMAND ----------
 
-ref_pdf = spark.read.table(REFERENCE_TBL).toPandas()
+ref_pdf = spark.read.table(REFERENCE_TBL).toPandas() #(predicciones fuera del fold).
 print(f"Reference: {ref_pdf.shape}")
 
 reference_features    = ref_pdf[[c for c in ref_pdf.columns
@@ -123,6 +128,10 @@ print(f"Reference predictions: μ={reference_predictions.mean():.3f}  σ={refere
 
 # MAGIC %md
 # MAGIC ## 3. Load current production batch + load model
+
+# COMMAND ----------
+
+# MAGIC %pip install -q catboost
 
 # COMMAND ----------
 
@@ -154,7 +163,7 @@ model = mlflow.sklearn.load_model("models:/regression_20feat_champion@Production
 # COMMAND ----------
 
 # Read the blind input for re-simulation
-blind_pdf = spark.read.table("main.default.regression_blind_input").toPandas()
+blind_pdf = spark.read.table("hr.agent.blind_test_data").toPandas()
 n_total = len(blind_pdf)
 batch_size = n_total // 4  # 50 each
 
@@ -279,6 +288,145 @@ for day in range(1, 5):
 
 # COMMAND ----------
 
+m
+
+# COMMAND ----------
+
+# DBTITLE 1,Baseline 200 filas sin drift
+# Baseline check: ALL 200 blind rows as 1 solo día (sin drift, sin split)
+X_full_blind = blind_pdf[feature_cols].values
+
+print("=== Baseline: 200 filas vs 800 referencia (sin drift) ===")
+print(f"{'Feature':<12} {'PSI':>8} {'KS stat':>8} {'Mean shift':>12} {'Severity'}")
+print("-" * 55)
+
+alerts_baseline = 0
+warnings_baseline = 0
+baseline_results = []
+for i, col in enumerate(feature_cols):
+    m = drift_metrics(reference_features[:, i], X_full_blind[:, i])
+    flag = " ⚠️" if m['severity'] == 'alert' else (" ⚡" if m['severity'] == 'warning' else "")
+    if m['severity'] == 'alert': alerts_baseline += 1
+    if m['severity'] == 'warning': warnings_baseline += 1
+    baseline_results.append({"feature": col, **m})
+    print(f"{col:<12} {m['psi']:>8.4f} {m['ks_stat']:>8.4f} {m['mean_shift']:>+12.3f}  {m['severity']}{flag}")
+
+# Prediction drift con 200 filas
+y_pred_full = model.predict(X_full_blind)
+pred_m = drift_metrics(reference_predictions, y_pred_full)
+
+print(f"\n--- Prediction drift (200 filas) ---")
+print(f"  PSI = {pred_m['psi']:.4f}  KS = {pred_m['ks_stat']:.4f}  Severity: {pred_m['severity']}")
+print(f"  Ref mean={pred_m['ref_mean']:.3f}  Blind mean={pred_m['cur_mean']:.3f}")
+print(f"\nResumen: {alerts_baseline} alerts, {warnings_baseline} warnings de 20 features")
+
+# Log to MLflow
+with mlflow.start_run(run_name="baseline_200rows_no_drift"):
+    mlflow.set_tag("stage", "monitoring_baseline")
+    mlflow.set_tag("batch_size", "200")
+    mlflow.set_tag("drift_injected", "none")
+    mlflow.log_metric("feature_psi_max", max(r['psi'] for r in baseline_results))
+    mlflow.log_metric("feature_psi_mean", np.mean([r['psi'] for r in baseline_results]))
+    mlflow.log_metric("feature_n_alerts", alerts_baseline)
+    mlflow.log_metric("feature_n_warnings", warnings_baseline)
+    mlflow.log_metric("prediction_psi", pred_m['psi'])
+    mlflow.log_metric("prediction_ks", pred_m['ks_stat'])
+    mlflow.log_metric("prediction_mean", float(y_pred_full.mean()))
+    for r in baseline_results:
+        mlflow.log_metric(f"psi_{r['feature']}", r['psi'])
+        mlflow.log_metric(f"ks_{r['feature']}", r['ks_stat'])
+    baseline_df = pd.DataFrame(baseline_results)
+    baseline_df.to_csv("/tmp/baseline_200rows.csv", index=False)
+    mlflow.log_artifact("/tmp/baseline_200rows.csv")
+    print(f"\n✅ Logged to MLflow run 'baseline_200rows_no_drift'")
+
+# COMMAND ----------
+
+# DBTITLE 1,Visualizaciones baseline drift
+# Visualizaciones del baseline (200 filas sin drift)
+fig, axes = plt.subplots(2, 2, figsize=(16, 11))
+
+# Panel 1: PSI por feature con umbrales
+ax = axes[0, 0]
+colors_psi = ['darkred' if r['psi'] >= PSI_ALERT else 'orange' if r['psi'] >= PSI_WARNING else 'steelblue'
+              for r in baseline_results]
+ax.barh(range(20), [r['psi'] for r in baseline_results], color=colors_psi, edgecolor='k', alpha=0.8)
+ax.axvline(PSI_WARNING, color='orange', ls='--', lw=1.5, label=f'Warning ({PSI_WARNING})')
+ax.axvline(PSI_ALERT, color='red', ls='--', lw=1.5, label=f'Alert ({PSI_ALERT})')
+ax.set_yticks(range(20))
+ax.set_yticklabels(feature_cols, fontsize=8)
+ax.set_xlabel('PSI')
+ax.set_title('PSI por feature (baseline 200 filas)')
+ax.legend(loc='lower right')
+ax.grid(alpha=0.3, axis='x')
+
+# Panel 2: Distribución reference vs blind para top 4 features con mayor PSI
+ax = axes[0, 1]
+top4_idx = sorted(range(20), key=lambda i: baseline_results[i]['psi'], reverse=True)[:4]
+colors_dist = ['#e74c3c', '#3498db', '#2ecc71', '#9b59b6']
+for rank, idx in enumerate(top4_idx):
+    col = feature_cols[idx]
+    ax.hist(reference_features[:, idx], bins=25, alpha=0.3, density=True,
+            color=colors_dist[rank], label=f'{col} (ref)')
+    ax.hist(X_full_blind[:, idx], bins=25, alpha=0.5, density=True,
+            color=colors_dist[rank], histtype='step', lw=2,
+            label=f'{col} (blind) PSI={baseline_results[idx]["psi"]:.3f}')
+ax.set_xlabel('Valor')
+ax.set_ylabel('Densidad')
+ax.set_title('Top 4 features: Reference vs Blind')
+ax.legend(fontsize=7, loc='upper right')
+ax.grid(alpha=0.3)
+
+# Panel 3: Mean shift en σ por feature
+ax = axes[1, 0]
+shifts = [(r['cur_mean'] - r['ref_mean']) / r['ref_std'] if r['ref_std'] > 0 else 0
+          for r in baseline_results]
+colors_shift = ['darkorange' if abs(s) > 0.1 else 'steelblue' for s in shifts]
+ax.bar(range(20), shifts, color=colors_shift, edgecolor='k', alpha=0.8)
+ax.axhline(0, color='black', lw=0.8)
+ax.axhline(+0.2, color='red', ls=':', alpha=0.5, label='±0.2σ')
+ax.axhline(-0.2, color='red', ls=':', alpha=0.5)
+ax.set_xticks(range(20))
+ax.set_xticklabels([f'f{i}' for i in range(20)], fontsize=8)
+ax.set_ylabel('Shift (σ)')
+ax.set_title('Mean shift por feature (en desviaciones estándar)')
+ax.legend()
+ax.grid(alpha=0.3, axis='y')
+
+# Panel 4: PSI vs KS stat (concordancia entre métricas)
+ax = axes[1, 1]
+psi_vals = [r['psi'] for r in baseline_results]
+ks_vals = [r['ks_stat'] for r in baseline_results]
+ax.scatter(psi_vals, ks_vals, c='steelblue', s=80, edgecolor='k', alpha=0.8)
+for i in range(20):
+    if psi_vals[i] > PSI_WARNING or ks_vals[i] > KS_WARNING:
+        ax.annotate(f'f{i}', (psi_vals[i], ks_vals[i]), fontsize=7,
+                    xytext=(3, 3), textcoords='offset points')
+ax.axvline(PSI_WARNING, color='orange', ls='--', alpha=0.6)
+ax.axhline(KS_WARNING, color='orange', ls='--', alpha=0.6)
+ax.axvline(PSI_ALERT, color='red', ls='--', alpha=0.6)
+ax.axhline(KS_ALERT, color='red', ls='--', alpha=0.6)
+ax.set_xlabel('PSI')
+ax.set_ylabel('KS stat')
+ax.set_title('Concordancia PSI vs KS (deberían correlacionar)')
+ax.grid(alpha=0.3)
+
+plt.tight_layout()
+plt.savefig('/tmp/baseline_visualizations.png', dpi=110, bbox_inches='tight')
+plt.show()
+
+# Log visualizaciones a MLflow
+with mlflow.start_run(run_name="baseline_visualizations"):
+    mlflow.set_tag("stage", "monitoring_baseline")
+    mlflow.set_tag("chart_type", "drift_overview")
+    mlflow.log_artifact('/tmp/baseline_visualizations.png')
+    mlflow.log_metric("feature_psi_max", max(psi_vals))
+    mlflow.log_metric("feature_ks_max", max(ks_vals))
+    mlflow.log_metric("max_shift_sigma", max(abs(s) for s in shifts))
+    print('\n✅ Visualizaciones logueadas en MLflow run "baseline_visualizations"')
+
+# COMMAND ----------
+
 # MAGIC %md
 # MAGIC ## 6. Persist monitoring history as Delta
 
@@ -375,7 +523,7 @@ with mlflow.start_run(run_name="monitoring_dashboard"):
 # MAGIC -- Daily severity timeline
 # MAGIC SELECT day, timestamp, severity, prediction_psi, feature_psi_max,
 # MAGIC        feature_n_alerts, feature_n_warnings
-# MAGIC FROM main.default.regression_monitoring
+# MAGIC FROM hr.agent.regression_monitoring
 # MAGIC ORDER BY day
 
 # COMMAND ----------
@@ -383,7 +531,7 @@ with mlflow.start_run(run_name="monitoring_dashboard"):
 # MAGIC %sql
 # MAGIC -- Days requiring intervention (>= warning)
 # MAGIC SELECT count(*) as days_with_drift
-# MAGIC FROM main.default.regression_monitoring
+# MAGIC FROM hr.agent.regression_monitoring
 # MAGIC WHERE severity IN ('warning', 'alert')
 
 # COMMAND ----------
@@ -423,4 +571,45 @@ with mlflow.start_run(run_name="monitoring_dashboard"):
 # MAGIC | MLflow logging | one run per day with all metrics |
 # MAGIC | Visual dashboard | inline + logged as artifact |
 # MAGIC | SQL queries | for ongoing dashboard / alerts |
+# MAGIC
 
+# COMMAND ----------
+
+# Compare distributions of training vs blind + log to MLflow
+train_pdf = spark.table("hr.agent.training_data").toPandas()
+blind_pdf = spark.table("hr.agent.blind_test_data").toPandas()
+
+feature_cols = [f"feature_{i}" for i in range(20)]
+
+comparison_rows = []
+for col in feature_cols:
+    t_mean = train_pdf[col].mean()
+    b_mean = blind_pdf[col].mean()
+    t_std = train_pdf[col].std()
+    b_std = blind_pdf[col].std()
+    shift_sigma = (b_mean - t_mean) / t_std if t_std > 0 else 0
+    comparison_rows.append({
+        "feature": col,
+        "train_mean": t_mean, "blind_mean": b_mean,
+        "train_std": t_std, "blind_std": b_std,
+        "shift_sigma": shift_sigma
+    })
+
+comparison_df = pd.DataFrame(comparison_rows)
+print(f"Training: {train_pdf.shape}  |  Blind: {blind_pdf.shape}")
+print(comparison_df.round(4).to_string(index=False))
+
+# Log to MLflow
+with mlflow.start_run(run_name="distribution_comparison"):
+    mlflow.set_tag("stage", "distribution_analysis")
+    mlflow.log_metric("max_abs_shift_sigma", float(comparison_df["shift_sigma"].abs().max()))
+    mlflow.log_metric("mean_abs_shift_sigma", float(comparison_df["shift_sigma"].abs().mean()))
+    mlflow.log_metric("n_features_shifted_gt_1sigma", int((comparison_df["shift_sigma"].abs() > 1).sum()))
+    mlflow.log_metric("n_features_shifted_gt_2sigma", int((comparison_df["shift_sigma"].abs() > 2).sum()))
+    for _, row in comparison_df.iterrows():
+        mlflow.log_metric(f"shift_sigma_{row['feature']}", row["shift_sigma"])
+    comparison_df.to_csv("/tmp/train_vs_blind_distributions.csv", index=False)
+    mlflow.log_artifact("/tmp/train_vs_blind_distributions.csv")
+    print(f"\n✅ Logged to MLflow run 'distribution_comparison'")
+    print(f"   Max |shift|: {comparison_df['shift_sigma'].abs().max():.3f}σ")
+    print(f"   Features > 2σ: {(comparison_df['shift_sigma'].abs() > 2).sum()}")

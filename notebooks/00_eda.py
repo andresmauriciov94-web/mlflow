@@ -33,36 +33,29 @@ from pyspark.ml.feature import VectorAssembler, StandardScaler
 from pyspark.ml.stat import Correlation
 from pyspark.ml.clustering import KMeans
 from pyspark.ml.evaluation import ClusteringEvaluator
+from sklearn.ensemble import IsolationForest
 
 warnings.filterwarnings("ignore")
 plt.rcParams["figure.dpi"] = 110
 
 # MLflow native — replace with your workspace path
-EXPERIMENT_NAME = "/Users/your.email@company.com/regression_eda"  # EDIT
+EXPERIMENT_NAME = "/Users/avalderrama@colombina.com/regression_eda" 
 mlflow.set_experiment(EXPERIMENT_NAME)
+mlflow.autolog(disable=True)  # evita runs fantasma en cada .fit()
 
 # Data path — adjust to your Volume/DBFS location
-TRAIN_PATH = "/Volumes/main/default/regression_data/training_data.csv"
+TRAIN_PATH = "hr.agent.training_data"
 print(f"Spark {spark.version}  |  MLflow {mlflow.__version__}")
 
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ## 2. Ingestion via Spark + persist as Delta
+# MAGIC ## 2. Ingestion via Spark 
 
 # COMMAND ----------
 
-train_sdf = spark.read.csv(TRAIN_PATH, header=True, inferSchema=True)
-print(f"Training: {train_sdf.count()} × {len(train_sdf.columns)}")
-
-# Persist as Delta for reproducibility (idempotent)
-try:
-    (train_sdf.write.format("delta").mode("overwrite")
-        .option("overwriteSchema", "true")
-        .saveAsTable("main.default.regression_training"))
-    print("Delta table: main.default.regression_training")
-except Exception as e:
-    print(f"(Delta save skipped: {e})")
+train_sdf = spark.table(TRAIN_PATH)
+print(f"Training: {train_sdf.count()}, {len(train_sdf.columns)}")
 
 train_sdf.printSchema()
 
@@ -81,6 +74,232 @@ n_nulls = train_sdf.select([F.sum(F.col(c).isNull().cast("int")).alias(c)
                               for c in train_sdf.columns]).toPandas().T.values.sum()
 n_dupes = train_sdf.count() - train_sdf.dropDuplicates().count()
 print(f"\nTotal nulls: {int(n_nulls)}  |  Duplicates: {int(n_dupes)}")
+
+# COMMAND ----------
+
+with mlflow.start_run(run_name="outlier_analysis"):
+    mlflow.set_tag("stage", "eda_outliers")
+    
+    # Convert Spark to pandas for outlier analysis (n=800 fits in memory)
+    pdf = train_sdf.toPandas()
+    feature_cols = [c for c in pdf.columns if c != "target"]
+    X_arr = pdf[feature_cols].values
+    
+    # --- Method 1: IQR ---
+    iqr_results = []
+    for col in feature_cols:
+        q1, q3 = pdf[col].quantile([0.25, 0.75])
+        iqr = q3 - q1
+        low_bound, high_bound = q1 - 1.5*iqr, q3 + 1.5*iqr
+        outliers = ((pdf[col] < low_bound) | (pdf[col] > high_bound)).sum()
+        iqr_results.append({
+            "feature": col,
+            "iqr_outliers": int(outliers),
+            "iqr_pct": 100 * outliers / len(pdf),
+        })
+    iqr_df = pd.DataFrame(iqr_results)
+    
+    # --- Method 2: Modified Z-score (MAD-based) ---
+    # MAD-Z is more robust than standard z-score to extreme values
+    # because median + MAD are not influenced by outliers themselves
+    mad_results = []
+    for col in feature_cols:
+        median = pdf[col].median()
+        mad = np.median(np.abs(pdf[col] - median))
+        if mad == 0:
+            mad_z = np.zeros(len(pdf))
+        else:
+            mad_z = 0.6745 * (pdf[col] - median) / mad
+        outliers = (np.abs(mad_z) > 3.5).sum()  # 3.5 = standard threshold
+        mad_results.append({
+            "feature": col,
+            "mad_outliers": int(outliers),
+            "mad_pct": 100 * outliers / len(pdf),
+        })
+    mad_df = pd.DataFrame(mad_results)
+    
+    # Merge both
+    univ_df = iqr_df.merge(mad_df, on="feature")
+    print("Univariate outlier analysis:")
+    print(univ_df.round(2).to_string(index=False))
+    
+    # Log totals
+    mlflow.log_metric("total_iqr_outliers", int(univ_df["iqr_outliers"].sum()))
+    mlflow.log_metric("total_mad_outliers", int(univ_df["mad_outliers"].sum()))
+    mlflow.log_metric("max_iqr_pct_per_feature", float(univ_df["iqr_pct"].max()))
+    mlflow.log_metric("max_mad_pct_per_feature", float(univ_df["mad_pct"].max()))
+
+# COMMAND ----------
+
+    # --- Method 3: Isolation Forest (multivariate) ---
+    # Detects observations where the COMBINATION of features is unusual
+    # even if each feature individually is within range
+    mlflow.end_run()  # cierra cualquier run huérfano de celdas anteriores
+    with mlflow.start_run(run_name=" Isolation Forest (multivariate) "):
+        iso = IsolationForest(
+            contamination=0.05,    # assume ~5% multivariate outliers
+            random_state=42,
+            n_estimators=200,
+        )
+        iso_pred = iso.fit_predict(X_arr)
+        iso_scores = -iso.score_samples(X_arr)  # higher = more anomalous
+        n_iso_outliers = (iso_pred == -1).sum()
+        mlflow.log_metric("isolation_forest_outliers", int(n_iso_outliers))
+        mlflow.log_metric("isolation_forest_pct", 100 * n_iso_outliers / len(pdf))
+        
+        print(f"\nIsolation Forest: {n_iso_outliers} multivariate outliers "
+            f"({100*n_iso_outliers/len(pdf):.1f}%)")
+        
+        # Inspect what the IF flagged
+        iso_outlier_idx = np.where(iso_pred == -1)[0]
+        if n_iso_outliers > 0:
+            # Are these flagged also via IQR or MAD? Cross-validate
+            outlier_summary = pd.DataFrame({
+                "row_idx": iso_outlier_idx,
+                "iso_score": iso_scores[iso_outlier_idx],
+                "target": pdf["target"].values[iso_outlier_idx],
+            }).sort_values("iso_score", ascending=False).head(10)
+            print("\nTop-10 multivariate outliers (highest anomaly score):")
+            print(outlier_summary.round(3).to_string(index=False))
+
+            # --- Visualization ---
+            fig, axes = plt.subplots(1, 3, figsize=(16, 4.5))
+
+            # Panel 1: outlier counts per feature (IQR vs MAD)
+            width = 0.35
+            x = np.arange(len(feature_cols))
+            axes[0].bar(x - width/2, univ_df["iqr_outliers"], width,
+                        label="IQR (1.5×)", color="steelblue", edgecolor="k")
+            axes[0].bar(x + width/2, univ_df["mad_outliers"], width,
+                        label="MAD-Z (>3.5)", color="darkorange", edgecolor="k")
+            axes[0].set_xticks(x)
+            axes[0].set_xticklabels([f.replace("feature_", "f") for f in feature_cols],
+                                        rotation=90, fontsize=8)
+            axes[0].set_ylabel("# outliers")
+            axes[0].set_title("Univariate outliers per feature")
+            axes[0].legend()
+
+            # Panel 2: distribution of Isolation Forest scores
+            axes[1].hist(iso_scores, bins=40, color="seagreen",
+                            edgecolor="k", alpha=0.85)
+            threshold = np.percentile(iso_scores, 95)
+            axes[1].axvline(threshold, color="red", ls="--",
+                                label=f"95th pct = {threshold:.3f}")
+            axes[1].set_xlabel("Anomaly score")
+            axes[1].set_ylabel("# observations")
+            axes[1].set_title("Isolation Forest anomaly scores")
+            axes[1].legend()
+
+            # Panel 3: do outliers correlate with extreme target?
+            axes[2].scatter(iso_scores, pdf["target"].values,
+                                alpha=0.5, s=20, c="purple", edgecolor="k")
+            axes[2].set_xlabel("Anomaly score")
+            axes[2].set_ylabel("target")
+            axes[2].set_title("Anomaly score vs target  (do outliers have extreme y?)")
+
+            plt.tight_layout()
+            plt.savefig("/tmp/outlier_analysis.png", dpi=110, bbox_inches="tight")
+            plt.close()
+            mlflow.log_artifact("/tmp/outlier_analysis.png")
+
+
+            # --- Decision ---
+            total_iqr   = int(univ_df["iqr_outliers"].sum())
+            total_mad   = int(univ_df["mad_outliers"].sum())
+            total_iso   = int(n_iso_outliers)
+
+            # Check: do isolation-forest-flagged rows have extreme targets?
+            # If yes, they're informative and should NOT be removed
+            if n_iso_outliers > 5:
+                from scipy.stats import ks_2samp
+                target_normal   = pdf["target"].values[iso_pred == 1]
+                target_outlier  = pdf["target"].values[iso_pred == -1]
+                ks_stat, ks_p   = ks_2samp(target_normal, target_outlier)
+                mlflow.log_metric("outlier_target_ks_pvalue", float(ks_p))
+                outliers_have_extreme_target = ks_p < 0.05
+            else:
+                outliers_have_extreme_target = False
+
+            # Decision logic
+            if total_iso == 0 and total_iqr == 0:
+                verdict = "No outliers detected by any method — keep all rows"
+            elif outliers_have_extreme_target:
+                verdict = (f"Outliers detected ({total_iso} multivariate) BUT they "
+                            f"correlate with extreme target values (KS p<0.05) — "
+                            f"keep all rows because outliers carry signal, not noise")
+            else:
+                verdict = (f"Outliers detected ({total_iso} multivariate) but "
+                            f"keep all rows: CatBoost/RF are robust to outliers via "
+                            f"tree splits, and Yeo-Johnson scaler downstream "
+                            f"compresses tails. Removal would discard data without "
+                            f"clear benefit.")
+
+            mlflow.set_tag("verdict_outliers", verdict)
+            print("\n" + "="*72)
+            print("OUTLIER ANALYSIS — VERDICT")
+            print("="*72)
+            print(verdict)
+
+# COMMAND ----------
+
+# --- Decision ---
+total_iqr   = int(univ_df["iqr_outliers"].sum())
+total_mad   = int(univ_df["mad_outliers"].sum())
+total_iso   = int(n_iso_outliers)
+
+# Check: do isolation-forest-flagged rows have extreme targets?
+# If yes, they're informative and should NOT be removed
+if n_iso_outliers > 5:
+    from scipy.stats import ks_2samp
+    target_normal   = pdf["target"].values[iso_pred == 1]
+    target_outlier  = pdf["target"].values[iso_pred == -1]
+    ks_stat, ks_p   = ks_2samp(target_normal, target_outlier)
+    mlflow.log_metric("outlier_target_ks_pvalue", float(ks_p))
+    outliers_have_extreme_target = ks_p < 0.05
+else:
+    outliers_have_extreme_target = False
+
+# Decision logic
+if total_iso == 0 and total_iqr == 0:
+    verdict = "No outliers detected by any method — keep all rows"
+elif outliers_have_extreme_target:
+    verdict = (f"Outliers detected ({total_iso} multivariate) BUT they "
+                f"correlate with extreme target values (KS p<0.05) — "
+                f"keep all rows because outliers carry signal, not noise")
+else:
+    verdict = (f"Outliers detected ({total_iso} multivariate) but "
+                f"keep all rows: CatBoost/RF are robust to outliers via "
+                f"tree splits, and Yeo-Johnson scaler downstream "
+                f"compresses tails. Removal would discard data without "
+                f"clear benefit.")
+
+mlflow.set_tag("verdict_outliers", verdict)
+print("\n" + "="*72)
+print("OUTLIER ANALYSIS — VERDICT")
+print("="*72)
+print(verdict)
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC **Verdict on outliers.** See the MLflow tag `verdict_outliers` for the
+# MAGIC automated decision. In all branches, we keep all rows because:
+# MAGIC
+# MAGIC - CatBoost and RandomForest split data by feature thresholds, so an 
+# MAGIC   outlier only contaminates the leaf it lands in — no global influence
+# MAGIC - The downstream PowerTransformer (Yeo-Johnson) compresses tails 
+# MAGIC   monotonically, reducing the leverage of extreme values
+# MAGIC - Removing rows from n=800 has high opportunity cost; removing 
+# MAGIC   informative extremes (the case our KS test guards against) would 
+# MAGIC   bias the model
+# MAGIC
+# MAGIC In production we re-evaluate this decision via the monitoring notebook,
+# MAGIC which checks if incoming batches contain proportionally more anomalies 
+# MAGIC than training (Isolation Forest score drift).
+
+# COMMAND ----------
+
+
 
 # COMMAND ----------
 
@@ -114,6 +333,34 @@ print(corr_df.round(4).to_string(index=False))
 print(f"\nFeatures con |ρ| - |r| > 0.05 (señal NO-lineal):")
 nonlin = corr_df[corr_df["nonlinearity_gap"] > 0.05]
 print(nonlin[["feature", "pearson", "spearman", "nonlinearity_gap"]].round(4).to_string(index=False))
+
+# COMMAND ----------
+
+# Mutual information para las features (no-linealidad)
+from sklearn.feature_selection import mutual_info_regression
+
+feature_cols = [c for c in train_sdf.columns if c != "target"]
+X = train_sdf.select(feature_cols).toPandas()
+y = train_sdf.select("target").toPandas().values.ravel()
+
+mi_scores = mutual_info_regression(X, y, random_state=42)
+mi_df = pd.DataFrame({"feature": feature_cols, "mutual_info": mi_scores})
+mi_df = mi_df.sort_values("mutual_info", ascending=False).reset_index(drop=True)
+
+# Top 10 mutual info
+top_mi = mi_df.head(10)["feature"].tolist()
+# Top 4 Pearson
+top_pearson = corr_df.sort_values("abs_pearson", ascending=False).head(4)["feature"].tolist()
+
+print("Top 10 features by mutual info:", top_mi)
+print("Top 4 features by |Pearson|:", top_pearson)
+
+# COMMAND ----------
+
+mlflow.end_run()  # cierra cualquier run huérfano de celdas anteriores
+with mlflow.start_run(run_name="feature_selection_mi"):
+    mlflow.log_param("top_10_mi_features", top_mi)
+    mlflow.log_param("top_4_pearson_features", top_pearson)
 
 # COMMAND ----------
 
@@ -283,7 +530,6 @@ with mlflow.start_run(run_name="linear_vs_nonlinear"):
 # MAGIC **Por qué clustering en EDA.** Si los datos forman grupos con `target` muy
 # MAGIC distinto pero esos grupos no son linealmente separables (centroides
 # MAGIC entrelazados en el espacio original), refuerza el argumento de no-linealidad.
-# MAGIC Además es una técnica clave en la oferta laboral.
 
 # COMMAND ----------
 
@@ -371,6 +617,12 @@ with mlflow.start_run(run_name="kmeans_clustering"):
 # COMMAND ----------
 
 # MAGIC %md
+# MAGIC η² = 1 − (varianza intra-clusters / varianza total)
+# MAGIC
+
+# COMMAND ----------
+
+# MAGIC %md
 # MAGIC ## 8. Conclusiones EDA
 # MAGIC
 # MAGIC | Question | Verdict | Evidence |
@@ -388,4 +640,4 @@ with mlflow.start_run(run_name="kmeans_clustering"):
 # MAGIC - Validate via **nested cross-validation** to avoid biased hyperparameter selection
 # MAGIC
 # MAGIC Next notebook: `01_training.py` — implements the modelling pipeline.
-
+# MAGIC

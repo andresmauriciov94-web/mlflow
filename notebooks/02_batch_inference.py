@@ -18,7 +18,7 @@
 # COMMAND ----------
 
 # MAGIC %pip install -q catboost
-# MAGIC dbutils.library.restartPython()
+# MAGIC
 
 # COMMAND ----------
 
@@ -31,14 +31,13 @@ import mlflow.sklearn
 from mlflow.tracking import MlflowClient
 from pyspark.sql import functions as F
 
-EXPERIMENT_NAME = "/Users/your.email@company.com/regression_inference"  # EDIT
+EXPERIMENT_NAME = "/Users/avalderrama@colombina.com/regression_inference"
 mlflow.set_experiment(EXPERIMENT_NAME)
 
-# Paths
-BLIND_PATH = "/Volumes/main/default/regression_data/blind_test_data.csv"
-INPUT_TABLE      = "main.default.regression_blind_input"
-PREDICTIONS_TBL  = "main.default.regression_predictions"
-REFERENCE_TBL    = "main.default.regression_training_reference"
+# Paths 
+INPUT_TABLE      = "hr.agent.blind_test_data"
+PREDICTIONS_TBL  = "hr.agent.regression_predictions"
+REFERENCE_TBL    = "hr.agent.regression_training_reference"
 REGISTERED_NAME  = "regression_20feat_champion"
 
 # COMMAND ----------
@@ -51,12 +50,8 @@ REGISTERED_NAME  = "regression_20feat_champion"
 
 # COMMAND ----------
 
-blind_sdf = spark.read.csv(BLIND_PATH, header=True, inferSchema=True)
+blind_sdf = spark.table(INPUT_TABLE)
 print(f"Blind data: {blind_sdf.count()} × {len(blind_sdf.columns)}")
-
-(blind_sdf.write.format("delta").mode("overwrite")
-    .option("overwriteSchema", "true")
-    .saveAsTable(INPUT_TABLE))
 print(f"Persisted as Delta: {INPUT_TABLE}")
 
 # COMMAND ----------
@@ -163,13 +158,13 @@ with mlflow.start_run(run_name=f"batch_inference_{datetime.now():%Y%m%d_%H%M%S}"
 # MAGIC %sql
 # MAGIC SELECT
 # MAGIC   model_version,
-# MAGIC   COUNT(*)         as n_predictions,
+# MAGIC   COUNT(*)                  as n_predictions,
 # MAGIC   ROUND(AVG(prediction), 3)  as pred_mean,
 # MAGIC   ROUND(STDDEV(prediction),3) as pred_std,
-# MAGIC   ROUND(MIN(prediction), 2)  as pred_min,
-# MAGIC   ROUND(MAX(prediction), 2)  as pred_max,
+# MAGIC   ROUND(MIN(prediction), 2)   as pred_min,
+# MAGIC   ROUND(MAX(prediction), 2)   as pred_max,
 # MAGIC   MAX(prediction_timestamp)   as last_run
-# MAGIC FROM main.default.regression_predictions
+# MAGIC FROM hr.agent.regression_predictions
 # MAGIC GROUP BY model_version
 
 # COMMAND ----------
@@ -188,4 +183,4 @@ with mlflow.start_run(run_name=f"batch_inference_{datetime.now():%Y%m%d_%H%M%S}"
 # MAGIC
 # MAGIC Cada corrida del job genera un MLflow run nuevo. El siguiente notebook
 # MAGIC (`03_monitoring`) consume estos runs para detectar drift.
-
+# MAGIC
